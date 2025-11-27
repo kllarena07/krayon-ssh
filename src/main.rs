@@ -24,7 +24,7 @@ fn create_ssh_packet(payload: Vec<u8>) -> Vec<u8> {
 
     let packet_length = 1 + payload.len() + padding_needed;
 
-    let mut packet = Vec::new();
+    let mut packet: Vec<u8> = vec![];
 
     // Packet length (4 bytes, big endian)
     packet.extend_from_slice(&(packet_length as u32).to_be_bytes());
@@ -79,7 +79,7 @@ fn handle_client(mut stream: TcpStream) -> io::Result<()> {
 
     // Read client identification string
     let mut buf = [0u8; 256];
-    let mut identification_buf = Vec::new();
+    let mut identification_buf: Vec<u8> = vec![];
 
     loop {
         let n = stream.read(&mut buf)?;
