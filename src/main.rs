@@ -5,6 +5,31 @@ use std::{
 
 use rand::RngCore;
 
+fn to_name_list(value: &str) -> Vec<u8> {
+    // A string containing a comma-separated list of names.
+    // https://datatracker.ietf.org/doc/html/rfc4251#section-5
+    // Examples:
+    // value                      representation (hex)
+    // -----                      --------------------
+    // (), the empty name-list    00 00 00 00
+    // ("zlib")                   00 00 00 04 7a 6c 69 62
+    // ("zlib,none")              00 00 00 09 7a 6c 69 62 2c 6e 6f 6e 65
+
+    let len = (value.len() as u32).to_be_bytes();
+
+    let mut bytes: Vec<u8> = vec![];
+
+    for b in len {
+        bytes.push(b);
+    }
+
+    for b in value.as_bytes().to_vec() {
+        bytes.push(b);
+    }
+
+    bytes
+}
+
 fn handle_client(mut stream: TcpStream) {
     println!("{:?}", stream);
 
