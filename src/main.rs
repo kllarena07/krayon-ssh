@@ -33,7 +33,7 @@ fn to_name_list(value: &str) -> Vec<u8> {
 fn handle_client(mut stream: TcpStream) {
     println!("{:?}", stream);
 
-    let mut buf = [0u8; 4096];
+    let mut buf = [0u8; 32768];
     loop {
         let n = stream.read(&mut buf).unwrap();
 
