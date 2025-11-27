@@ -137,10 +137,12 @@ fn handle_client(mut stream: TcpStream) -> io::Result<()> {
     kex_payload.extend_from_slice(&to_name_list(SC_MAC_ALGOS));
 
     //  name-list    compression_algorithms_client_to_server
-    kex_payload.extend_from_slice(&to_name_list("")); // NONE
+    const CS_COMP_ALGOS: &str = "none";
+    kex_payload.extend_from_slice(&to_name_list(CS_COMP_ALGOS));
 
     //  name-list    compression_algorithms_server_to_client
-    kex_payload.extend_from_slice(&to_name_list("")); // NONE
+    const SC_COMP_ALGOS: &str = "none";
+    kex_payload.extend_from_slice(&to_name_list(SC_COMP_ALGOS));
 
     //  name-list    languages_client_to_server
     kex_payload.extend_from_slice(&to_name_list("")); // NONE
