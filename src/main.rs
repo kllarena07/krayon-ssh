@@ -3,7 +3,10 @@ use std::{
     net::{TcpListener, TcpStream},
 };
 
+use ed25519_dalek::{Signer, SigningKey, VerifyingKey};
+use num_bigint::BigUint;
 use rand::RngCore;
+use sha2::{Digest, Sha256};
 
 fn create_ssh_packet(payload: Vec<u8>) -> Vec<u8> {
     // SSH packet format: [packet_length][padding_length][payload][padding][MAC]
@@ -173,6 +176,33 @@ fn from_mpint(data: &[u8]) -> Result<Vec<u8>, &'static str> {
     Ok(int_bytes.to_vec())
 }
 
+// Group14 2048-bit prime from RFC 3526
+fn get_group14_prime() -> BigUint {
+    // This is the 2048-bit MODP Group from RFC 3526, Section 3
+    let prime_hex = "FFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD1\
+29024E088A67CC74020BBEA63B139B22514A08798E3404DD\
+EF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245\
+E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7ED\
+EE386BFB5A899FA5AE9F24117C4B1FE649286651ECE45B3D\
+C2007CB8A163BF0598DA48361C55D39A69163FA8FD24CF5F\
+83655D23DCA3AD961C62F356208552BB9ED529077096966D\
+670C354E4ABC9804F1746C08CA18217C32905E462E36CE3B\
+E39E772C180E86039B2783A2EC07A28FB5C55DF06F4C52C9\
+DE2BCBF6955817183995497CEA956AE515D2261898FA0510\
+15728E5A8AACAA68FFFFFFFFFFFFFFFF";
+
+    BigUint::parse_bytes(prime_hex.as_bytes(), 16).unwrap()
+}
+
+fn generate_host_key() -> (SigningKey, VerifyingKey) {
+    let mut rng = rand::rng();
+    let mut secret_key_bytes = [0u8; 32];
+    rng.fill_bytes(&mut secret_key_bytes);
+    let signing_key = SigningKey::from_bytes(&secret_key_bytes);
+    let verifying_key = signing_key.verifying_key();
+    (signing_key, verifying_key)
+}
+
 fn handle_client(mut stream: TcpStream) -> io::Result<()> {
     println!("{:?}", stream);
 
@@ -267,21 +297,117 @@ fn handle_client(mut stream: TcpStream) -> io::Result<()> {
 
     println!("KEXINIT packet sent");
 
-    // Continue reading packets from client
+    // Authenticate the USERAUTH_REQUEST (packet 30)
+    // ignore this packet
+    let mut packet_buf = [0u8; 32768];
     loop {
-        let mut packet_buf = [0u8; 32768];
         let n = stream.read(&mut packet_buf)?;
 
         if n == 0 {
             return Ok(());
         }
 
-        println!("Received {} bytes from client", n);
-        std::io::stdout().write_all(&packet_buf[..n])?;
-        std::io::stdout().flush()?;
+        break;
     }
+    println!("Recieved bytes: {}", String::from_utf8_lossy(&packet_buf));
 
     // Next step is the Diffie-Hellman Key Exchange
+    let mut packet_buf: Vec<u8> = vec![];
+    let mut temp_buf = [0u8; 4096];
+    loop {
+        let n = stream.read(&mut temp_buf)?;
+
+        if n == 0 {
+            return Ok(());
+        }
+
+        packet_buf.extend_from_slice(&temp_buf[..n]);
+        break;
+    }
+    println!("Recieved bytes: {:?}", packet_buf);
+
+    let parsed = from_ssh_packet(&packet_buf).unwrap();
+    println!("Extracted SSH packet payload: {:?}", parsed);
+
+    let mpint_data = &parsed[1..]; // Skip packet type 30
+    let client_public_key = from_mpint(mpint_data).unwrap();
+    println!("Client Public Key: {:?}", client_public_key);
+
+    // 1. Generate a secret exponent b
+    let mut rng = rand::rng();
+    let prime = get_group14_prime();
+    let generator = BigUint::from(2u32);
+
+    // Generate random secret exponent b (should be at least 2*bits of security)
+    let mut secret_bytes = [0u8; 32];
+    rng.fill_bytes(&mut secret_bytes);
+    let secret_b = BigUint::from_bytes_be(&secret_bytes);
+
+    // 2. Compute public key B = g^b mod p
+    let server_public_key_b = generator.modpow(&secret_b, &prime);
+
+    // Convert client public key A to BigUint
+    let client_public_key_a = BigUint::from_bytes_be(&client_public_key);
+
+    // 3. Compute shared secret K = A^b mod p
+    let shared_secret_k = client_public_key_a.modpow(&secret_b, &prime);
+
+    println!(
+        "Server public key B: {:?}",
+        server_public_key_b.to_bytes_be()
+    );
+    println!("Shared secret K: {:?}", shared_secret_k.to_bytes_be());
+
+    // Generate host key
+    let (host_private_key, host_public_key) = generate_host_key();
+
+    // 4. Send KEXDH_REPLY with B, host key, and signature of the exchange hash
+    let mut kexdh_reply_payload: Vec<u8> = vec![];
+
+    // SSH_MSG_KEXDH_REPLY (type 31)
+    kexdh_reply_payload.push(31u8);
+
+    // Server host key blob (ssh-ed25519 format)
+    let host_key_bytes = host_public_key.as_bytes();
+    let mut host_key_blob = Vec::new();
+    host_key_blob.extend_from_slice(&to_name_list("ssh-ed25519"));
+    host_key_blob.extend_from_slice(&(host_key_bytes.len() as u32).to_be_bytes());
+    host_key_blob.extend_from_slice(host_key_bytes);
+    kexdh_reply_payload.extend_from_slice(&to_ssh_string(&host_key_blob));
+
+    // Server public key B (as MPINT)
+    let server_public_b_bytes = server_public_key_b.to_bytes_be();
+    kexdh_reply_payload.extend_from_slice(&to_mpint(&server_public_b_bytes));
+
+    // Shared secret H (exchange hash) - simplified for now
+    // In real implementation, this should be SHA256 of all KEX parameters
+    let mut hasher = Sha256::new();
+    hasher.update(&client_public_key);
+    hasher.update(&server_public_b_bytes);
+    let exchange_hash = hasher.finalize();
+
+    // Sign the exchange hash with host private key
+    let signature = host_private_key.sign(&exchange_hash);
+    let signature_bytes = signature.to_bytes();
+
+    // Add signature blob (ssh-ed25519 format)
+    let mut signature_blob = Vec::new();
+    signature_blob.extend_from_slice(&to_name_list("ssh-ed25519"));
+    signature_blob.extend_from_slice(&(signature_bytes.len() as u32).to_be_bytes());
+    signature_blob.extend_from_slice(&signature_bytes);
+    kexdh_reply_payload.extend_from_slice(&to_ssh_string(&signature_blob));
+
+    // Create and send KEXDH_REPLY packet
+    let kexdh_reply_packet = create_ssh_packet(kexdh_reply_payload);
+    println!("KEXDH_REPLY packet: {:02x?}", kexdh_reply_packet);
+    stream.write_all(&kexdh_reply_packet)?;
+    stream.flush()?;
+
+    println!("KEXDH_REPLY packet sent");
+
+    loop {}
+
+    // Ok(())
 }
 
 fn main() -> std::io::Result<()> {
