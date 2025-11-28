@@ -176,6 +176,8 @@ fn handle_client(mut stream: TcpStream) -> io::Result<()> {
         std::io::stdout().write_all(&packet_buf[..n])?;
         std::io::stdout().flush()?;
     }
+
+    // Next step is the Diffie-Hellman Key Exchange
 }
 
 fn main() -> std::io::Result<()> {
