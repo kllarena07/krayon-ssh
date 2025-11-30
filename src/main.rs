@@ -296,11 +296,11 @@ fn handle_client(mut stream: TcpStream) -> io::Result<()> {
     kex_payload.extend_from_slice(&to_name_list(SC_CIPHERS));
 
     //  name-list    mac_algorithms_client_to_server
-    const CS_MAC_ALGOS: &str = "hmac-sha2-256";
+    const CS_MAC_ALGOS: &str = "";
     kex_payload.extend_from_slice(&to_name_list(CS_MAC_ALGOS));
 
     //  name-list    mac_algorithms_server_to_client
-    const SC_MAC_ALGOS: &str = "hmac-sha2-256";
+    const SC_MAC_ALGOS: &str = "";
     kex_payload.extend_from_slice(&to_name_list(SC_MAC_ALGOS));
 
     //  name-list    compression_algorithms_client_to_server
